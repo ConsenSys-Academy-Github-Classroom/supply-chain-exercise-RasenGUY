@@ -4,11 +4,17 @@ module.exports = {
       host: "localhost",
       port: 8545,
       network_id: "*" // Match any network id
-    }
-  },
-  compilers: {
-    solc: {
-      version: ">=0.5.16 <0.9.0"
+    }, 
+
+    ganache: {
+      host: "localhost",
+      port: 7545,
+      network_id: "5777"
     }
   }
+  // compilers: {
+  //   solc: {
+  //     version: "^0.8.9"
+  //   }
+  // }
 };

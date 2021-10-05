@@ -4,16 +4,22 @@ pragma solidity >=0.5.16 <0.9.0;
 contract SupplyChain {
 
   // <owner>
-  address public owner; 
+  address public owner = msg.sender; 
 
   // <skuCount>
-  uint public skuCount; 
+  uint public skuCount = 0; 
 
   // <items mapping>
   mapping (uint => Item) public items;
 
   // <enum State: ForSale, Sold, Shipped, Received>
-  enum State { ForSale, Sold, Shipped, Received }
+  enum State
+  { 
+    ForSale, 
+    Sold, 
+    Shipped, 
+    Received 
+  }
 
   // <struct Item: name, sku, price, state, seller, and buyer>
   struct Item {
@@ -30,16 +36,16 @@ contract SupplyChain {
    */
 
   // <LogForSale event: sku arg>
-  event LogForSale(string itemName, uint sku, State state, uint price);
+  event LogForSale(uint sku);
 
   // <LogSold event: sku arg>
-  event LogSold(string itemName, uint sku, uint amountSoldFor);
+  event LogSold(uint sku);
 
   // <LogShipped event: sku arg>
-  event LogShipped(string itemName, uint sku, address seller, State state);
+  event LogShipped(uint sku);
 
   // <LogReceived event: sku arg>
-  event LogReceived(string itemName, uint sku, address buyer, State state);
+  event LogReceived(uint sku);
   
   /* 
    * Modifiers
@@ -58,21 +64,16 @@ contract SupplyChain {
     _;
   }
 
-  modifier paidEnough(uint _price) { 
-    require(msg.value >= _price); 
+  modifier paidEnough(uint _sku) { 
+    require(msg.value >= items[_sku].price, "not enough cash"); 
     _;
   }
 
   modifier checkValue (uint _sku) {
     //refund them after pay for item (why it is before, _ checks for logic before func)
     _;
-    uint _price = items[_sku].price;
-    uint amountToRefund = msg.value - _price;
-    // items[_sku].buyer.transfer(amountToRefund); // rewrite this to current accepted method
-    (bool sent) = items[_sku].buyer.send(amountToRefund);
-    if (!sent){
-      revert(); // reverts transaction if something happens
-    } 
+    uint amountToRefund = msg.value - items[_sku].price;
+    items[_sku].buyer.transfer(amountToRefund);
   }
 
   // For each of the following modifiers, use what you learned about modifiers
@@ -84,11 +85,12 @@ contract SupplyChain {
   // an Item has been added?
 
   modifier forSale (uint _sku) {
-    require(items[_sku].price != 0, "needs a price");
-    require(items[_sku].seller != 0x0000000000000000000000000000000000000000, "there is no seller"); 
     require(items[_sku].state == State.ForSale, "item is not forsale");
+    require(items[_sku].price != 0, "item has no price");
+    require(items[_sku].seller != address(0), "there should be a seller"); 
     _;
   }
+
   modifier sold(uint _sku){
     require(items[_sku].state == State.Sold);
     _;
@@ -102,43 +104,28 @@ contract SupplyChain {
     _;
   } 
 
-  constructor() {
-    // 1. Set the owner to the transaction sender
-    // 2. Initialize the sku count to 0. Question, is this necessary?
-    owner = msg.sender; 
-    skuCount = 0;
-  }
-
   function addItem(string memory _name, uint _price) public returns (bool) {
     // 1. Create a new item and put in array
     // 2. Increment the skuCount by one
     // 3. Emit the appropriate event
     // 4. return true
-    Item memory item;
 
-    item.name = _name; 
-    item.price = _price;
-    item.state = State.ForSale;
-    item.seller = payable(msg.sender);
-    items[skuCount] = item; 
-    skuCount++;
-    item.sku = skuCount;
-
-    emit LogForSale(item.name, item.sku, item.state, item.price);
-    return true;
-  
     // hint:
-    // items[skuCount] = Item({
-    //  name: _name, 
-    //  sku: skuCount, 
-    //  price: _price, 
-    //  state: State.ForSale, 
-    //  seller: msg.sender, 
-    //  buyer: address(0)
-    //});
-    //
-    //skuCount = skuCount + 1;
-    // return true;
+    Item memory item = Item({
+     name: _name, 
+     sku: skuCount, 
+     price: _price, 
+     state: State.ForSale, 
+     seller: msg.sender, 
+     buyer: address(0) 
+    });
+
+    items[skuCount] = item;
+    skuCount = skuCount + 1;
+
+    emit LogForSale(item.sku);
+
+    return true;
   }
 
   // Implement this buyItem function. 
@@ -152,12 +139,11 @@ contract SupplyChain {
   //    - check the value after the function is called to make 
   //      sure the buyer is refunded any excess ether sent. 
   // 6. call the event associated with this function!
-  function buyItem(uint sku) public payable forSale(sku) paidEnough(sku) checkValue(sku) {
-    (bool sent) = items[sku].seller.send(msg.value);
-    require(sent);
-    items[sku].buyer = payable(msg.sender);
+  function buyItem(uint sku) public payable paidEnough(sku) forSale(sku) checkValue(sku) {
+    items[sku].buyer = msg.sender;
+    items[sku].seller.transfer(items[sku].price);
     items[sku].state = State.Sold;
-    emit LogSold(items[sku].name, sku, items[sku].price);
+    emit LogSold(sku);
   }
 
   // 1. Add modifiers to check:
@@ -167,7 +153,7 @@ contract SupplyChain {
   // 3. call the event associated with this function!
   function shipItem(uint sku) public sold(sku) verifyCaller(items[sku].seller) {
     items[sku].state = State.Shipped;
-    emit LogShipped(items[sku].name, sku, items[sku].seller, items[sku].state);
+    emit LogShipped(sku);
   }
 
   // 1. Add modifiers to check 
@@ -177,7 +163,7 @@ contract SupplyChain {
   // 3. Call the event associated with this function!
   function receiveItem(uint sku) public shipped(sku) verifyCaller(items[sku].buyer) {
     items[sku].state = State.Received;
-    emit LogReceived(items[sku].name, sku, items[sku].buyer, items[sku].state);
+    emit LogReceived(sku);
   }
 
   // Uncomment the following code block. it is needed to run tests
